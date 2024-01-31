@@ -53,6 +53,65 @@ class HistoryItem {
     }
 }
 
+class ImageUriWithType : Codable{
+    var uri: String
+    var mimeType: String?
+    
+    init(uri:String, mimeType:String?){
+        self.uri = uri
+        self.mimeType = mimeType
+    }
+    
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        uri = try container.decode(String.self, forKey: .uri)
+        mimeType = try container.decode(String.self, forKey: .mimeType)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(uri, forKey: .uri)
+        try container.encode(mimeType, forKey: .mimeType)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case uri
+        case mimeType
+    }
+}
+
+class ImageDataWithType : Codable {
+    var data: Data
+    var mimeType: String?
+    
+    init(data: UIImage, mimeType: String?) {
+        self.data = data.pngData()! // Convert UIImage to Data
+        self.mimeType = mimeType
+    }
+    
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        data = try container.decode(Data.self, forKey: .data)
+        mimeType = try container.decode(String.self, forKey: .mimeType)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(mimeType, forKey: .mimeType)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case data
+        case mimeType
+    }
+    
+    func getImage() -> UIImage? {
+        return UIImage(data: self.data)
+    }
+}
+
+
 enum GeminiXError: Error {
     case invalidArgument(String)
 }
@@ -106,16 +165,16 @@ class GeminiX {
         }
     }
 
-    static func sendMessage(onSuccess:@escaping(String, Bool, _ callback:@escaping() -> Void) -> Void, onError:@escaping(String) -> Void, inputText:String, images:[UIImage]?, streamResponse:Bool?) {
+    static func sendMessage(onSuccess:@escaping(String, Bool, _ callback:@escaping() -> Void) -> Void, onError:@escaping(String) -> Void, inputText:String, images:[ImageDataWithType]?, streamResponse:Bool?) {
         if((self.model == nil)){
             onError("Model not initialised")
             return
         }
+        let inputContents = getInputContents(text:inputText, images:images ?? [], onError:onError)
         Task.detached(operation: {
             do{
-                let inputContents = getInputContents(text:inputText, images:images ?? [], onError:onError)
-               
                 if(streamResponse == true){
+                    var finalResponse = ""
                     guard let contentStream = model?.generateContentStream(inputContents) else {
                         onError("No content stream in response")
                         return;
@@ -123,6 +182,7 @@ class GeminiX {
                     let group = DispatchGroup()
                     for try await chunk in contentStream {
                         if let text = chunk.text {
+                            finalResponse += text
                             group.enter()
                             onSuccess(text, false, {
                                 group.leave()
@@ -130,7 +190,7 @@ class GeminiX {
                         }
                     }
                     group.notify(queue: .main) {
-                        onSuccess("", true, {})
+                        onSuccess(finalResponse, true, {})
                     }
                 }else{
                     let response = try await self.model?.generateContent(inputContents)
@@ -144,15 +204,14 @@ class GeminiX {
 
     }
 
-    static func countTokens(onSuccess:@escaping(String) -> Void, onError:@escaping(String) -> Void, inputText:String, images:[UIImage]?) {
+    static func countTokens(onSuccess:@escaping(String) -> Void, onError:@escaping(String) -> Void, inputText:String, images:[ImageDataWithType]?) {
         if((self.model == nil)){
             onError("Model not initialised")
             return
         }
+        let inputContents = getInputContents(text:inputText, images:images ?? [], onError:onError)
         Task.detached(operation:{
             do{
-                let inputContents = getInputContents(text:inputText, images:images ?? [], onError:onError)
-                
                 let response = try await self.model?.countTokens(inputContents)
                 let result = (response?.totalTokens)!
                 onSuccess("\(result)")
@@ -192,7 +251,7 @@ class GeminiX {
         onSuccess()
     }
     
-    static func sendChatMessage(onSuccess:@escaping(String, Bool, _ callback:@escaping() -> Void) -> Void, onError:@escaping(String) -> Void, inputText:String, images:[UIImage]?, streamResponse:Bool?) {
+    static func sendChatMessage(onSuccess:@escaping(String, Bool, _ callback:@escaping() -> Void) -> Void, onError:@escaping(String) -> Void, inputText:String, images:[ImageDataWithType]?, streamResponse:Bool?) {
         if((self.model == nil)){
             onError("Model not initialised")
             return
@@ -201,11 +260,11 @@ class GeminiX {
             onError("Chat not initialised")
             return
         }
+        let inputContents = getInputContents(text:inputText, images:images ?? [], onError:onError)
         Task.detached(operation: {
             do{
-                let inputContents = getInputContents(text:inputText, images:images ?? [], onError:onError)
-                
                 if(streamResponse == true){
+                    var finalResponse = ""
                     guard let contentStream = self.chat?.sendMessageStream(inputContents) else {
                         onError("No content stream in response")
                         return;
@@ -213,6 +272,7 @@ class GeminiX {
                     let group = DispatchGroup()
                     for try await chunk in contentStream {
                         if let text = chunk.text {
+                            finalResponse += text
                             group.enter()
                             onSuccess(text, false, {
                                 group.leave()
@@ -220,7 +280,7 @@ class GeminiX {
                         }
                     }
                     group.notify(queue: .main) {
-                        onSuccess("", true, {})
+                        onSuccess(finalResponse, true, {})
                     }
                 }else{
                     let response = try await self.chat?.sendMessage(inputContents)
@@ -234,7 +294,7 @@ class GeminiX {
 
     }
 
-    static func countChatTokens(onSuccess:@escaping(String) -> Void, onError:@escaping(String) -> Void, inputText:String?, images:[UIImage]?) {
+    static func countChatTokens(onSuccess:@escaping(String) -> Void, onError:@escaping(String) -> Void, inputText:String?, images:[ImageDataWithType]?) {
         if((self.model == nil)){
             onError("Model not initialised")
             return
@@ -261,35 +321,79 @@ class GeminiX {
     }
 
     static func getChatHistory(onSuccess:@escaping([HistoryItem]) -> Void, onError:@escaping(String) -> Void) {
-            if((self.model == nil)){
-                onError("Model not initialised")
-                return
-            }
-            if((self.chat == nil)){
-                onError("Chat not initialised")
-                return
-            }
-            
-            var chatHistory:[ModelContent] = self.chat?.history ?? []
-            var history:[HistoryItem] = []
-            for chatContent in chatHistory{
-                var isUser = chatContent.role == "user"
-                var historyParts:[HistoryPart] = []
-                for chatPart in chatContent.parts {
-                    switch chatPart {
-                      case let .text(textVal):
-                        let historyPart = TextHistoryPart(content: chatPart.text!)
-                        historyParts.append(historyPart)
-                      case let .data(mimetypeVal, dataVal):
-                        let historyPart = BlobHistoryPart(content: dataVal, mimeType: mimetypeVal)
-                        historyParts.append(historyPart)
-                      }
-                }
-                let historyItem = HistoryItem(parts:historyParts, isUser:isUser)
-                history.append(historyItem)
-            }
-            onSuccess(history)
+        if((self.model == nil)){
+            onError("Model not initialised")
+            return
         }
+        if((self.chat == nil)){
+            onError("Chat not initialised")
+            return
+        }
+        
+        let chatHistory:[ModelContent] = self.chat?.history ?? []
+        var history:[HistoryItem] = []
+        for chatContent in chatHistory{
+            let isUser = chatContent.role == "user"
+            var historyParts:[HistoryPart] = []
+            for chatPart in chatContent.parts {
+                var historyPart:HistoryPart
+                switch chatPart {
+                  case let .text(textVal):
+                    historyPart = TextHistoryPart(content: textVal)
+                    historyParts.append(historyPart)
+                  case let .data(mimetypeVal, dataVal):
+                    if(mimetypeVal == "image/jpeg" || mimetypeVal == "image/png"){
+                        let image = UIImage(data: dataVal)
+                        historyPart = ImageHistoryPart(content: image!)
+                        
+                    }else{
+                        historyPart = BlobHistoryPart(content: dataVal, mimeType: mimetypeVal)
+                    }
+                  }
+                historyParts.append(historyPart)
+            }
+            let historyItem = HistoryItem(parts:historyParts, isUser:isUser)
+            history.append(historyItem)
+        }
+        onSuccess(history)
+    }
+    
+    static func getModelImage(imageUriWithType:ImageUriWithType) -> ImageDataWithType {
+        let image = getImageForUri(imageUri: imageUriWithType.uri)
+        let imageDataWithType = ImageDataWithType(data: image!, mimeType: imageUriWithType.mimeType)
+        return imageDataWithType
+    }
+    
+    static func getModelImages(imageUrisWithTypes:[ImageUriWithType]) -> [ImageDataWithType] {
+        var modelImages:[ImageDataWithType] = []
+        for imageUriWithType in imageUrisWithTypes {
+            let imageDataWithType = getModelImage(imageUriWithType: imageUriWithType)
+            modelImages.append(imageDataWithType)
+        }
+        return modelImages
+    }
+    
+    static func getImagesForUris(imageUris:[String]) -> [UIImage]{
+        var images:[UIImage] = []
+        for uri in imageUris {
+            if let image = getImageForUri(imageUri: uri){
+                images.append(image)
+            }
+        }
+        return images
+    }
+    
+    static func getImageForUri(imageUri:String) -> UIImage?{
+        var image:UIImage? = nil
+        if let url = URL(string: imageUri) {
+            if FileManager.default.fileExists(atPath: url.path) {
+                if let _image = UIImage(contentsOfFile: url.path) {
+                    image = _image;
+                }
+            }
+        }
+        return image
+    }
 
     /******************
      * Internal functions
@@ -334,7 +438,7 @@ class GeminiX {
     }
     
 
-    private static func getInputContents(text:String, images:[UIImage], onError:@escaping(String) -> Void) -> [ModelContent] {
+    private static func getInputContents(text:String, images:[ImageDataWithType], onError:@escaping(String) -> Void) -> [ModelContent] {
         var parts:[ModelContent.Part] = []
         if(text != ""){
             let textPart = ModelContent.Part.text(text)
@@ -342,7 +446,19 @@ class GeminiX {
         }
     
         for image in images{
-            if let data = image.jpegData(compressionQuality: 0.8) {
+            if(image.mimeType != nil){
+                if(image.mimeType == "image/png") {
+                    if let data = image.getImage()!.pngData() {
+                        let imagePart = ModelContent.Part.data(mimetype: "image/png", data)
+                        parts.append(imagePart)
+                    }
+                }else if let data = image.getImage()!.jpegData(compressionQuality: 0.8) {
+                    let imagePart = ModelContent.Part.data(mimetype: "image/jpeg", data)
+                    parts.append(imagePart)
+                }else{
+                    onError("Unsupported mime type: "+image.mimeType!+" - only image/png and image/jpeg are supported on iOS")
+                }
+            }else if let data = image.getImage()!.jpegData(compressionQuality: 0.8) {
                 let imagePart = ModelContent.Part.data(mimetype: "image/jpeg", data)
                 parts.append(imagePart)
             }else{
