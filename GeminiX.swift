@@ -1,3 +1,5 @@
+import Foundation
+import UIKit
 import GoogleGenerativeAI
 
 protocol HistoryPart {
@@ -226,28 +228,32 @@ class GeminiX {
             onError("Model not initialised")
             return
         }
-
-        var chatHistory:[ModelContent] = []
-        if(history != nil){
-            for item in history! {
-                let userRole = item.isUser ? "user" : "model"
-                for part in item.parts {
-                    if(part.type == "text"){
-                        chatHistory.append(ModelContent(role: userRole, parts: part.content as! String))
-                    }else if(part.type == "image"){
-                        chatHistory.append(ModelContent(role: userRole, parts: part.content as! UIImage))
-                    }else if(part.type == "blob"){
-                        let part = part as! BlobHistoryPart
-                        let blob = part.content as! Data
-                        let mimeType = part.mimeType
-                        let dataPart = ModelContent.Part.data(mimetype: mimeType, blob)
-                        chatHistory.append(ModelContent(role: userRole, parts: dataPart))
+        
+        do {
+            var chatHistory:[ModelContent] = []
+            if(history != nil){
+                for item in history! {
+                    let userRole = item.isUser ? "user" : "model"
+                    for part in item.parts {
+                        if(part.type == "text"){
+                            chatHistory.append(ModelContent(role: userRole, parts: part.content as! String))
+                        }else if(part.type == "image"){
+                            try chatHistory.append(ModelContent(role: userRole, parts: part.content as! UIImage))
+                        }else if(part.type == "blob"){
+                            let part = part as! BlobHistoryPart
+                            let blob = part.content as! Data
+                            let mimeType = part.mimeType
+                            let dataPart = ModelContent.Part.data(mimetype: mimeType, blob)
+                            try chatHistory.append(ModelContent(role: userRole, parts: dataPart))
+                        }
                     }
                 }
             }
+            self.chat = self.model?.startChat(history: chatHistory)
+        }catch{
+            onError("\(error)")
         }
-
-        self.chat = self.model?.startChat(history: chatHistory)
+        
         onSuccess()
     }
     
@@ -393,6 +399,22 @@ class GeminiX {
             }
         }
         return image
+    }
+    
+    static func getImagesFromOptions(options:[String:Any]) -> [ImageDataWithType]{
+        var imageUrisWithTypes:[ImageUriWithType] = []
+        
+        if let imagesArray = options["images"] as? [[String: Any]] {
+            for imageDict in imagesArray {
+                if let uriString = imageDict["uri"] as? String {
+                    let mimeType = imageDict["mimeType"] as? String
+                    let imageUri = ImageUriWithType(uri: uriString, mimeType: mimeType)
+                    imageUrisWithTypes.append(imageUri)
+                }
+            }
+        }
+        let modelImages:[ImageDataWithType] = GeminiX.getModelImages(imageUrisWithTypes: imageUrisWithTypes)
+        return modelImages
     }
 
     /******************
