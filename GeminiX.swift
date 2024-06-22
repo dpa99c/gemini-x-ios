@@ -118,13 +118,14 @@ enum GeminiXError: Error {
     case invalidArgument(String)
 }
 
+@available(iOS 15.0, *)
 class GeminiX {
 
 
     /****************
      * Internal properties
      ***********************/
-
+    
     private static var model: GenerativeModel?
     private static var chat: Chat?
 
@@ -355,8 +356,14 @@ class GeminiX {
                     }else{
                         historyPart = BlobHistoryPart(content: dataVal, mimeType: mimetypeVal)
                     }
-                  }
-                historyParts.append(historyPart)
+                    historyParts.append(historyPart)
+                case .fileData(mimetype: let mimetype, uri: let uri):
+                    onError("File data not supported")
+                case .functionCall(_):
+                    onError("Function call not supported")
+                case .functionResponse(_):
+                    onError("Function response not supported")
+                }
             }
             let historyItem = HistoryItem(parts:historyParts, isUser:isUser)
             history.append(historyItem)
